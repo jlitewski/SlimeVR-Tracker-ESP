@@ -41,13 +41,13 @@ public:
 
 	void print();
 
-	int32_t getVersion() const;
+	uint32_t getVersion() const;
 
 	size_t getSensorCount() const;
-	SensorConfig getSensor(size_t sensorID) const;
-	void setSensor(size_t sensorID, const SensorConfig& config);
-	SensorToggleState getSensorToggles(size_t sensorId) const;
-	void setSensorToggles(size_t sensorId, SensorToggleState state);
+	SensorConfig getSensor(const size_t sensorID) const;
+	void setSensor(const size_t sensorID, const SensorConfig& config);
+	SensorToggleState getSensorToggles(const size_t sensorId) const;
+	void setSensorToggles(const size_t sensorId, SensorToggleState state);
 	void eraseSensors();
 
 	bool loadTemperatureCalibration(
@@ -61,7 +61,7 @@ public:
 
 private:
 	void loadSensors();
-	bool runMigrations(int32_t version);
+	bool runMigrations(const uint32_t version);
 
 	bool m_Loaded = false;
 

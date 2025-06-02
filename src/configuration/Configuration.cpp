@@ -24,9 +24,17 @@
 #include "Configuration.h"
 
 #include <LittleFS.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <array>
+#include <cstdlib>
 
 #include "../FSHelper.h"
+#include "configuration/SensorConfig.h"
 #include "consts.h"
+#include "motionprocessing/GyroTemperatureCalibrator.h"
+#include "sensors/SensorToggles.h"
 #include "utils.h"
 
 #define DIR_CALIBRATIONS "/calibrations"
@@ -61,7 +69,7 @@ void Configuration::setup() {
 
 		auto file = LittleFS.open("/config.bin", "r");
 
-		file.read((uint8_t*)&m_Config.version, sizeof(int32_t));
+		file.read((uint8_t*)&m_Config.version, sizeof(uint32_t));
 
 		if (m_Config.version < CURRENT_CONFIGURATION_VERSION) {
 			m_Logger.debug(
@@ -109,26 +117,26 @@ void Configuration::save() {
 			continue;
 		}
 
-		char path[17];
-		sprintf(path, DIR_CALIBRATIONS "/%zu", i);
+		std::array<char, 17> path;
+		sprintf(path.data(), DIR_CALIBRATIONS "/%zu", i);
 
 		m_Logger.trace("Saving sensor config data for %d", i);
 
-		File file = LittleFS.open(path, "w");
+		fs::File file = LittleFS.open(path.data(), "w");
 		file.write((uint8_t*)&config, sizeof(SensorConfig));
 		file.close();
 
-		sprintf(path, DIR_TOGGLES "/%zu", i);
+		sprintf(path.data(), DIR_TOGGLES "/%zu", i);
 
 		m_Logger.trace("Saving sensor toggle state for %d", i);
 
-		file = LittleFS.open(path, "w");
+		file = LittleFS.open(path.data(), "w");
 		file.write((uint8_t*)&m_SensorToggles[i], sizeof(SensorToggleState));
 		file.close();
 	}
 
 	{
-		File file = LittleFS.open("/config.bin", "w");
+		fs::File file = LittleFS.open("/config.bin", "w");
 		file.write((uint8_t*)&m_Config, sizeof(DeviceConfig));
 		file.close();
 	}
@@ -147,11 +155,11 @@ void Configuration::reset() {
 	m_Logger.debug("Reset configuration");
 }
 
-int32_t Configuration::getVersion() const { return m_Config.version; }
+uint32_t Configuration::getVersion() const { return m_Config.version; }
 
 size_t Configuration::getSensorCount() const { return m_Sensors.size(); }
 
-SensorConfig Configuration::getSensor(size_t sensorID) const {
+SensorConfig Configuration::getSensor(const size_t sensorID) const {
 	if (sensorID >= m_Sensors.size()) {
 		return {};
 	}
@@ -159,7 +167,7 @@ SensorConfig Configuration::getSensor(size_t sensorID) const {
 	return m_Sensors.at(sensorID);
 }
 
-void Configuration::setSensor(size_t sensorID, const SensorConfig& config) {
+void Configuration::setSensor(const size_t sensorID, const SensorConfig& config) {
 	size_t currentSensors = m_Sensors.size();
 
 	if (sensorID >= currentSensors) {
@@ -169,7 +177,7 @@ void Configuration::setSensor(size_t sensorID, const SensorConfig& config) {
 	m_Sensors[sensorID] = config;
 }
 
-SensorToggleState Configuration::getSensorToggles(size_t sensorId) const {
+SensorToggleState Configuration::getSensorToggles(const size_t sensorId) const {
 	if (sensorId >= m_SensorToggles.size()) {
 		return {};
 	}
@@ -177,7 +185,7 @@ SensorToggleState Configuration::getSensorToggles(size_t sensorId) const {
 	return m_SensorToggles.at(sensorId);
 }
 
-void Configuration::setSensorToggles(size_t sensorId, SensorToggleState state) {
+void Configuration::setSensorToggles(const size_t sensorId, SensorToggleState state) {
 	size_t currentSensors = m_SensorToggles.size();
 
 	if (sensorId >= currentSensors) {
@@ -191,23 +199,27 @@ void Configuration::eraseSensors() {
 	m_Sensors.clear();
 
 	SlimeVR::Utils::forEachFile(DIR_CALIBRATIONS, [&](SlimeVR::Utils::File f) {
-		char path[17];
-		sprintf(path, DIR_CALIBRATIONS "/%s", f.name());
+		std::array<char, 17> path;
+		sprintf(path.data(), DIR_CALIBRATIONS "/%s", f.name());
+
+		m_Logger.trace("Erasing sensor calibration data for %s", f.name());
 
 		f.close();
 
-		LittleFS.remove(path);
+		LittleFS.remove(path.data());
 	});
+
+	m_Logger.debug("Erased sensor calibration data");
 
 	save();
 }
 
 void Configuration::loadSensors() {
 	SlimeVR::Utils::forEachFile(DIR_CALIBRATIONS, [&](SlimeVR::Utils::File f) {
-		SensorConfig sensorConfig;
+		SensorConfig sensorConfig = {};
 		f.read((uint8_t*)&sensorConfig, sizeof(SensorConfig));
 
-		uint8_t sensorId = strtoul(f.name(), nullptr, 10);
+		uint8_t const sensorId = strtoul(f.name(), nullptr, 10);
 		m_Logger.debug(
 			"Found sensor calibration for %s at index %d",
 			calibrationConfigTypeToString(sensorConfig.type),
@@ -227,10 +239,10 @@ void Configuration::loadSensors() {
 	});
 
 	SlimeVR::Utils::forEachFile(DIR_TOGGLES, [&](SlimeVR::Utils::File f) {
-		SensorToggleState sensorToggleState;
+		SensorToggleState sensorToggleState = {};
 		f.read((uint8_t*)&sensorToggleState, sizeof(SensorToggleState));
 
-		uint8_t sensorId = strtoul(f.name(), nullptr, 10);
+		uint8_t const sensorId = strtoul(f.name(), nullptr, 10);
 		m_Logger.debug("Found sensor toggle state at index %d", sensorId);
 
 		setSensorToggles(sensorId, sensorToggleState);
@@ -238,21 +250,26 @@ void Configuration::loadSensors() {
 }
 
 bool Configuration::loadTemperatureCalibration(
-	uint8_t sensorId,
+	const uint8_t sensorId,
 	GyroTemperatureCalibrationConfig& config
 ) {
 	if (!SlimeVR::Utils::ensureDirectory(DIR_TEMPERATURE_CALIBRATIONS)) {
 		return false;
 	}
 
-	char path[32];
-	sprintf(path, DIR_TEMPERATURE_CALIBRATIONS "/%d", sensorId);
+	std::array<char, 32> path;
+	sprintf(path.data(), DIR_TEMPERATURE_CALIBRATIONS "/%d", sensorId);
 
-	if (!LittleFS.exists(path)) {
+	if (!LittleFS.exists(path.data())) {
+		m_Logger.debug(
+			"Sensor temperature calibration not found for sensorId:%d at path:%s, skipping",
+			sensorId,
+			path.data()
+		);
 		return false;
 	}
 
-	auto f = SlimeVR::Utils::openFile(path, "r");
+	auto f = SlimeVR::Utils::openFile(path.data(), "r");
 	if (f.isDirectory()) {
 		return false;
 	}
@@ -291,19 +308,19 @@ bool Configuration::loadTemperatureCalibration(
 }
 
 bool Configuration::saveTemperatureCalibration(
-	uint8_t sensorId,
+	const uint8_t sensorId,
 	const GyroTemperatureCalibrationConfig& config
 ) {
 	if (config.type == SensorConfigType::NONE) {
 		return false;
 	}
 
-	char path[32];
-	sprintf(path, DIR_TEMPERATURE_CALIBRATIONS "/%d", sensorId);
+	std::array<char, 32> path;
+	sprintf(path.data(), DIR_TEMPERATURE_CALIBRATIONS "/%d", sensorId);
 
 	m_Logger.trace("Saving temperature calibration data for sensorId:%d", sensorId);
 
-	File file = LittleFS.open(path, "w");
+	fs::File file = LittleFS.open(path.data(), "w");
 	file.write((uint8_t*)&config, sizeof(GyroTemperatureCalibrationConfig));
 	file.close();
 
@@ -311,7 +328,7 @@ bool Configuration::saveTemperatureCalibration(
 	return true;
 }
 
-bool Configuration::runMigrations(int32_t version) { return true; }
+bool Configuration::runMigrations(const uint32_t /*version*/) { return true; }
 
 void Configuration::print() {
 	m_Logger.info("Configuration:");
@@ -333,14 +350,13 @@ void Configuration::print() {
 				);
 
 				m_Logger.info("            A_Ainv     :");
-				for (uint8_t i = 0; i < 3; i++) {
-					m_Logger.info(
-						"                         %f, %f, %f",
-						UNPACK_VECTOR_ARRAY(c.data.bmi160.A_Ainv[i])
-					);
-				}
+                for (auto AAinv : c.data.bmi160.A_Ainv) {
+                    m_Logger.info(
+                        "                         %f, %f, %f",
+                        UNPACK_VECTOR_ARRAY(AAinv));
+                }
 
-				m_Logger.info(
+                m_Logger.info(
 					"            G_off      : %f, %f, %f",
 					UNPACK_VECTOR_ARRAY(c.data.bmi160.G_off)
 				);
@@ -355,14 +371,13 @@ void Configuration::print() {
 				);
 
 				m_Logger.info("            A_Ainv     :");
-				for (uint8_t i = 0; i < 3; i++) {
-					m_Logger.info(
-						"                         %f, %f, %f",
-						UNPACK_VECTOR_ARRAY(c.data.sfusion.A_Ainv[i])
-					);
-				}
+                for (auto AAinv : c.data.sfusion.A_Ainv) {
+                    m_Logger.info(
+                        "                         %f, %f, %f",
+                        UNPACK_VECTOR_ARRAY(AAinv));
+                }
 
-				m_Logger.info(
+                m_Logger.info(
 					"            G_off      : %f, %f, %f",
 					UNPACK_VECTOR_ARRAY(c.data.sfusion.G_off)
 				);
@@ -395,27 +410,27 @@ void Configuration::print() {
 				);
 
 				m_Logger.info("            A_Ainv:");
-				for (uint8_t i = 0; i < 3; i++) {
-					m_Logger.info(
-						"                    %f, %f, %f",
-						UNPACK_VECTOR_ARRAY(c.data.mpu9250.A_Ainv[i])
-					);
-				}
+                for (auto AAinv : c.data.mpu9250.A_Ainv)
+                {
+                    m_Logger.info(
+                        "                    %f, %f, %f",
+                        UNPACK_VECTOR_ARRAY(AAinv));
+                }
 
-				m_Logger.info(
+                m_Logger.info(
 					"            M_B   : %f, %f, %f",
 					UNPACK_VECTOR_ARRAY(c.data.mpu9250.M_B)
 				);
 
 				m_Logger.info("            M_Ainv:");
-				for (uint8_t i = 0; i < 3; i++) {
-					m_Logger.info(
-						"                    %f, %f, %f",
-						UNPACK_VECTOR_ARRAY(c.data.mpu9250.M_Ainv[i])
-					);
-				}
+                for (auto MAinv : c.data.mpu9250.M_Ainv)
+                {
+                    m_Logger.info(
+                        "                    %f, %f, %f",
+                        UNPACK_VECTOR_ARRAY(MAinv));
+                }
 
-				m_Logger.info(
+                m_Logger.info(
 					"            G_off  : %f, %f, %f",
 					UNPACK_VECTOR_ARRAY(c.data.mpu9250.G_off)
 				);
@@ -437,6 +452,11 @@ void Configuration::print() {
 			case SensorConfigType::BNO0XX:
 				m_Logger.info("            magEnabled: %d", c.data.bno0XX.magEnabled);
 
+				break;
+
+			case SensorConfigType::RUNTIME_CALIBRATION:
+			default:
+				m_Logger.error("            Unknown sensor type: %d", c.type);
 				break;
 		}
 	}

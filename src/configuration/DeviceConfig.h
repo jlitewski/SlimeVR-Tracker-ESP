@@ -26,7 +26,7 @@
 
 namespace SlimeVR::Configuration {
 struct DeviceConfig {
-	int32_t version;
+	uint32_t version; // Configuration version, used for migrations
 };
 }  // namespace SlimeVR::Configuration
 
